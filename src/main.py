@@ -18,6 +18,8 @@ from typing import Sequence
 import requests
 from dateutil import tz
 
+from asobiticket import fetch_asobiticket
+
 def is_debug() -> None:
     """デバッグ環境かどうか
     
@@ -78,7 +80,7 @@ def send_discord(webhook_url: str, content: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# パース補助関数（未実装）
+# パース補助関数
 # ---------------------------------------------------------------------------
 
 def parse_asobistore_items(html: str) -> list[DeadlineEntry]:
@@ -118,9 +120,10 @@ def parse_asobistore_items(html: str) -> list[DeadlineEntry]:
             continue
         # 例: "あと7日!" → 7
         m = re.search(r"あと(\d+)日", deadline_text)
-        if not m:
-            continue
-        days = int(m.group(1))
+        if m:
+            days = int(m.group(1))
+        else:
+            days = 0
         # 今日からdays日後の23:59を締切とする
         jst = tz.gettz("Asia/Tokyo")
         now = datetime.now(tz=jst)
@@ -129,38 +132,6 @@ def parse_asobistore_items(html: str) -> list[DeadlineEntry]:
         entries.append(DeadlineEntry(title=title, url=url, deadline=deadline))
 
     return entries
-
-
-def parse_ticket_event_list(html: str) -> list[str]:
-    """イベント一覧ページを解析し、各イベントの URL を取得する。
-
-    Args:
-        html (str): イベント一覧ページの HTML。
-
-    Returns:
-        list[str]: 各イベントページの URL リスト。
-
-    Raises:
-        NotImplementedError: 実際のパース処理は未実装。
-    """
-
-    raise NotImplementedError
-
-
-def parse_ticket_event(html: str) -> list[DeadlineEntry]:
-    """イベントページを解析し、締切がある受付情報を取得する。
-
-    Args:
-        html (str): イベントページの HTML。
-
-    Returns:
-        list[DeadlineEntry]: 締切付き受付情報のリスト。
-
-    Raises:
-        NotImplementedError: 実際のパース処理は未実装。
-    """
-
-    raise NotImplementedError
 
 
 # ---------------------------------------------------------------------------
@@ -178,27 +149,24 @@ def get_asobistore_items() -> list[DeadlineEntry]:
     response.raise_for_status()
     return parse_asobistore_items(response.text)
 
-
 def get_ticket_events() -> list[DeadlineEntry]:
-    """アソビチケットからイベントを取得して解析する。
+    """アソビチケットのイベントを取得して解析する。
 
     Returns:
         list[DeadlineEntry]: 締切付きイベントのリスト。
     """
 
-    response = requests.get(ASOBITICKET_EVENTS_URL, timeout=10)
-    response.raise_for_status()
-
-    event_urls: list[str] = parse_ticket_event_list(response.text)
-
+    events = fetch_asobiticket()
     entries: list[DeadlineEntry] = []
-    for url in event_urls:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        entries.extend(parse_ticket_event(resp.text))
+    for event in events:
+        for start, end in event.uketsuke_kikan_list:
+            # 締切は終了日時の23:59とする
+            deadline = end.replace(hour=23, minute=59, second=0, microsecond=0)
+            entries.append(DeadlineEntry(
+                title=event.title if event.title else "(不明)",
+                url=event.url, deadline=end
+            ))
     return entries
-
-
 # ---------------------------------------------------------------------------
 # ユーティリティ関数
 # ---------------------------------------------------------------------------
@@ -239,7 +207,7 @@ def format_message(section: str, entries: Sequence[DeadlineEntry]) -> str:
 
     lines = [f"**{section}**"]
     for e in entries:
-        deadline = e.deadline.strftime("%Y-%m-%d %H:%M")
+        deadline = e.deadline.strftime("%Y-%m-%d")
         lines.append(f"- {e.title} | 締切: {deadline} | <{e.url}>")
     return "\n".join(lines)
 
