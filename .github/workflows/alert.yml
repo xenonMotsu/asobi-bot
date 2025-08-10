@@ -2,7 +2,7 @@ name: Asobi Alerts
 
 on:
   schedule:
-    - cron: '0 12 * * *'
+    - cron: '0 10 * * *'
   workflow_dispatch:
 
 jobs:
@@ -11,8 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: astral-sh/setup-uv@v2
-        with:
-          python-version: '3.11'
       - run: uv run python src/main.py
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
