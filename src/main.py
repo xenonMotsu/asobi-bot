@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Sequence
 
+from collections import defaultdict
+
 import requests
 from dateutil import tz
 
@@ -76,8 +78,10 @@ def send_discord(webhook_url: str, content: str) -> None:
     if is_debug():
         print(f"DEBUG: Sending to {webhook_url} with content:\n{content}")
         return
-    requests.post(webhook_url, json={"content": content}, timeout=10)
-
+    ret = requests.post(webhook_url, json={"content": content}, timeout=10)
+    if ret.status_code != 204:
+        print(f"Failed to send Discord message: {ret.status_code} {ret.text}")
+        raise RuntimeError(f"Discord webhook failed with status {ret.status_code}")
 
 # ---------------------------------------------------------------------------
 # パース補助関数
@@ -194,21 +198,72 @@ def filter_entries(
     return result
 
 
-def format_message(section: str, entries: Sequence[DeadlineEntry]) -> str:
+def format_message(
+        section: str,
+        entries: Sequence[DeadlineEntry],
+        omitted_message: str = "...他にも省略されています...",
+        max_display: int = 10
+    ) -> str:
     """エントリのリストから Discord 用のメッセージを作成する。
 
     Args:
         section (str): メッセージの見出し。
         entries (Sequence[DeadlineEntry]): 表示するエントリ。
+        omitted_message (str): 省略時に表示するメッセージ。
+        max_display (int): 最大表示数。
 
     Returns:
         str: Discord に送信する文字列。
     """
 
-    lines = [f"**{section}**"]
+    def merge_by_prefix(entries: list[DeadlineEntry], prefix_len: int) -> list[DeadlineEntry]:
+        grouped = defaultdict(list)
+        for e in entries:
+            key = e.title[:prefix_len] if len(e.title) >= prefix_len else e.title
+            grouped[key].append(e)
+        merged = []
+        for key, group in grouped.items():
+            if len(group) == 1:
+                merged.append(group[0])
+            else:
+                merged.append(DeadlineEntry(title=key + "...", url=group[0].url, deadline=group[0].deadline))
+        return merged
+
+    # deadlineごとにグループ化
+    by_deadline = defaultdict(list)
     for e in entries:
-        deadline = e.deadline.strftime("%Y-%m-%d")
-        lines.append(f"- {e.title} | 締切: {deadline} | <{e.url}>")
+        by_deadline[e.deadline].append(e)
+
+    # 締切日で昇順ソート
+    sorted_deadlines = sorted(by_deadline.keys())
+
+    all_merged_by_deadline = []  # [(deadline, [merged items], omitted_flag)]
+    for deadline in sorted_deadlines:
+        group = by_deadline[deadline]
+        merged = group[:]
+        omitted = False
+        if len(merged) > max_display:
+            L = max(len(e.title) for e in merged)
+            for l in range(L, 0, -1):
+                merged = merge_by_prefix(merged, l)
+                if len(merged) <= max_display:
+                    break
+            if len(merged) > max_display:
+                merged = merged[:max_display]
+            omitted = True
+        all_merged_by_deadline.append((deadline, merged, omitted))
+
+    lines = [f"**{section}**"]
+    any_omitted = False
+    for deadline, merged_items, omitted in all_merged_by_deadline:
+        deadline_str = deadline.strftime("%Y-%m-%d")
+        lines.append(f"締切: {deadline_str}")
+        for e in merged_items:
+            lines.append(f"- [{e.title}]({e.url})")
+        if omitted:
+            any_omitted = True
+    if any_omitted:
+        lines.append(omitted_message)
     return "\n".join(lines)
 
 
@@ -232,25 +287,53 @@ def main() -> None:
     jst = tz.gettz("Asia/Tokyo")
     now = datetime.now(tz=jst)
 
-    messages: list[str] = []
+
+    def send_entries_by_deadline(section: str, entries: list[DeadlineEntry], omitted_message: str):
+        # 締切日ごとにグループ化
+        by_deadline = defaultdict(list)
+        for e in entries:
+            by_deadline[e.deadline.date()].append(e)
+        # 締切日で昇順ソート
+        for deadline in sorted(by_deadline.keys()):
+            group = by_deadline[deadline]
+            msg = format_message(
+                section,
+                group,
+                omitted_message=omitted_message,
+            )
+            send_discord(webhook_url, msg)
+
+    any_sent = False
 
     try:
         store_items = filter_entries(get_asobistore_items(), alert_days, now)
         if store_items:
-            messages.append(format_message("アソビストア 締切間近", store_items))
+            send_entries_by_deadline(
+                "アソビストア 締切間近",
+                store_items,
+                omitted_message=f"...一部省略されています...\n詳細は[アソビストア]({ASOBISTORE_URL})を確認してください。",
+            )
+            any_sent = True
     except NotImplementedError:
-        messages.append("アソビストアのパースは未実装です。")
+        send_discord(webhook_url, "アソビストアのパースは未実装です。")
+        any_sent = True
 
     try:
         ticket_items = filter_entries(get_ticket_events(), alert_days, now)
         if ticket_items:
-            messages.append(format_message("アソビチケット 締切間近", ticket_items))
+            send_entries_by_deadline(
+                "アソビチケット 締切間近",
+                ticket_items,
+                omitted_message=f"...一部省略されています...\n詳細は[アソビチケット]({ASOBITICKET_EVENTS_URL})を確認してください。",
+            )
+            any_sent = True
     except NotImplementedError:
-        messages.append("アソビチケットのパースは未実装です。")
+        send_discord(webhook_url, "アソビチケットのパースは未実装です。")
+        any_sent = True
 
-    if messages:
-        send_discord(webhook_url, "\n\n".join(messages))
-
+    if not any_sent:
+        no_message = ",".join(map(str, sorted(alert_days))) + "日後に締切のアイテムはありませんでした。"
+        send_discord(webhook_url, no_message)
 
 if __name__ == "__main__":
     main()
