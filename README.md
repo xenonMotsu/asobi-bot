@@ -13,6 +13,7 @@
 - GitHubアカウント
 - Discord Webhook URL
 - （ローカル開発用）Python 3.11以上
+- （ローカル開発用）[uv](https://github.com/astral-sh/uv)
 
 ## セットアップ手順
 1. リポジトリをクローンまたは作成し、このコード一式を配置
@@ -22,8 +23,10 @@
    - `Settings` → `Secrets and variables` → `Actions` → `New repository secret`
    - 名前: `DISCORD_WEBHOOK_URL`
    - 値: Discordで作成したWebhook URL
-4. 初回はGitHub Actionsの`Run workflow`で手動実行して動作確認
-5. 以降は毎日JST21:00に自動実行されます
+4. 必要に応じてリポジトリ変数`ALERT_DAYS`を設定（例: `0,1,7`）
+   - 締切当日・前日・1週間前に通知する設定
+5. 初回はGitHub Actionsの`Run workflow`で手動実行して動作確認
+6. 以降は毎日JST21:00に自動実行されます
 
 ## 技術概要
 - スケジューラ: GitHub Actionsのcron機能
@@ -33,15 +36,13 @@
 - 通知: Discord Webhook API
 
 ## 注意事項
-- 対象サイトのDOM構造が変わると、パース処理が失敗します。その場合は`src/main.py`内の`parse_asobistore_items`と`parse_ticket_event`のセレクタや正規表現を修正してください。
+- 対象サイトのDOM構造に依存するパース処理は未実装です。利用する際は`src/main.py`内の`parse_asobistore_items`、`parse_ticket_event_list`、`parse_ticket_event`を実装し、サイトの構造変更に合わせて調整してください。
 - スクレイピングは対象サイトの利用規約やrobots.txtに従って行ってください。
 - GitHub Actionsのスケジュールは厳密な時刻保証はなく、数分の遅延が発生することがあります。
 
 ## ローカルでの動作確認
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r src/requirements.txt
 export DISCORD_WEBHOOK_URL="<Webhook URL>"
-python src/main.py
+export ALERT_DAYS="0,1,7"  # 任意
+uv run python src/main.py
 ```
