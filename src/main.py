@@ -7,10 +7,12 @@
 まま TODO としてマークしている。
 """
 
+import re
 import sys
 import os
+from bs4 import BeautifulSoup
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Sequence
 
 import requests
@@ -91,8 +93,42 @@ def parse_asobistore_items(html: str) -> list[DeadlineEntry]:
     Raises:
         NotImplementedError: 実際のパース処理は未実装。
     """
+    soup = BeautifulSoup(html, "html.parser")
+    entries: list[DeadlineEntry] = []
+    base_url = "https://shop.asobistore.jp"
 
-    raise NotImplementedError
+    for item_box in soup.select("div.item_box"):
+        # 商品名
+        name_tag = item_box.select_one(".text_area .name.product_name_area a")
+        if not name_tag:
+            continue
+        title = name_tag.get_text(strip=True)
+        url = name_tag.get("href")
+        if url and not url.startswith("http"):
+            url = base_url + url
+
+        # 締切日数の抽出
+        deadline_text = None
+        for mark in item_box.select(".icon .shimekiri_mark"):
+            text = mark.get_text(strip=True)
+            if text.startswith("あと") and "日" in text:
+                deadline_text = text
+                break
+        if not deadline_text:
+            continue
+        # 例: "あと7日!" → 7
+        m = re.search(r"あと(\d+)日", deadline_text)
+        if not m:
+            continue
+        days = int(m.group(1))
+        # 今日からdays日後の23:59を締切とする
+        jst = tz.gettz("Asia/Tokyo")
+        now = datetime.now(tz=jst)
+        deadline = (now + timedelta(days=days)).replace(hour=23, minute=59, second=0, microsecond=0)
+
+        entries.append(DeadlineEntry(title=title, url=url, deadline=deadline))
+
+    return entries
 
 
 def parse_ticket_event_list(html: str) -> list[str]:
