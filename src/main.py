@@ -211,7 +211,7 @@ def format_message(
         section: str,
         entries: Sequence[DeadlineEntry],
         omitted_message: str = "...他にも省略されています...",
-        max_display: int = 15
+        max_display: int = 25
     ) -> str:
     """エントリのリストから Discord 用のメッセージを作成する。
 
@@ -238,42 +238,51 @@ def format_message(
                 merged.append(DeadlineEntry(title=key + "...", url=group[0].url, deadline=group[0].deadline))
         return merged
 
-    # deadlineごとにグループ化
-    by_deadline = defaultdict(list)
-    for e in entries:
-        by_deadline[e.deadline].append(e)
+    # 1日分のみを受け取る前提なので、entriesは同じ締切日のみ
+    def build_lines(merged_items, omitted):
+        lines = [f"**{section}**"]
+        if merged_items:
+            deadline_str = merged_items[0].deadline.strftime("%Y-%m-%d")
+            lines.append(f"締切: {deadline_str}")
+            for e in merged_items:
+                lines.append(f"- [{e.title}]({e.url})")
+        if omitted:
+            lines.append(omitted_message)
+        return lines
 
-    # 締切日で昇順ソート
-    sorted_deadlines = sorted(by_deadline.keys())
-
-    all_merged_by_deadline = []  # [(deadline, [merged items], omitted_flag)]
-    for deadline in sorted_deadlines:
-        group = by_deadline[deadline]
-        merged = group[:]
+    # 2000字未満になるまでmax_displayを減らす
+    min_display = 3
+    current_max = max_display
+    merged = entries[:]
+    omitted = False
+    while True:
+        merged = entries[:]
         omitted = False
-        if len(merged) > max_display:
+        if len(merged) > current_max:
             L = max(len(e.title) for e in merged)
             for l in range(L, 0, -1):
                 merged = merge_by_prefix(merged, l)
-                if len(merged) <= max_display:
+                if len(merged) <= current_max:
                     break
-            if len(merged) > max_display:
-                merged = merged[:max_display]
+            if len(merged) > current_max:
+                merged = merged[:current_max]
             omitted = True
-        all_merged_by_deadline.append((deadline, merged, omitted))
-
-    lines = [f"**{section}**"]
-    any_omitted = False
-    for deadline, merged_items, omitted in all_merged_by_deadline:
-        deadline_str = deadline.strftime("%Y-%m-%d")
-        lines.append(f"締切: {deadline_str}")
-        for e in merged_items:
-            lines.append(f"- [{e.title}]({e.url})")
-        if omitted:
-            any_omitted = True
-    if any_omitted:
-        lines.append(omitted_message)
-    return "\n".join(lines)
+        lines = build_lines(merged, omitted)
+        msg = "\n".join(lines)
+        if len(msg) <= 2000 or current_max <= min_display:
+            # 2000字未満、またはこれ以上減らせない
+            break
+        current_max -= 2
+    # それでも超える場合はさらに強制的に切り詰め
+    while len(msg) > 2000 and len(merged) > min_display:
+        merged = merged[:len(merged)-1]
+        omitted = True
+        lines = build_lines(merged, omitted)
+        msg = "\n".join(lines)
+    # 最後の手段: 省略メッセージのみ
+    if len(msg) > 2000:
+        msg = f"**{section}**\n(省略されています)\n" + omitted_message
+    return msg
 
 
 # ---------------------------------------------------------------------------
