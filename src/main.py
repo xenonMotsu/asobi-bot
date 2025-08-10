@@ -32,7 +32,7 @@ def is_debug() -> None:
     
 
 ASOBISTORE_URL: str = (
-    "https://shop.asobistore.jp/product/catalog/s/simekiri/sime/1/cf113/118/n/120#a1"
+    "https://shop.asobistore.jp/product/catalog/s/simekiri/n/120/sime/1/cf113/118/p"
 )
 ASOBITICKET_BASE: str = "https://asobiticket2.asobistore.jp"
 ASOBITICKET_EVENTS_URL: str = f"{ASOBITICKET_BASE}/booths"
@@ -149,9 +149,18 @@ def get_asobistore_items() -> list[DeadlineEntry]:
         list[DeadlineEntry]: 締切付きアイテムのリスト。
     """
 
-    response = requests.get(ASOBISTORE_URL, timeout=10)
-    response.raise_for_status()
-    return parse_asobistore_items(response.text)
+    ret = []
+    for i in range(5):
+        response = requests.get(f"{ASOBISTORE_URL}/{i}", timeout=10)
+        response.raise_for_status()
+        ret_i = parse_asobistore_items(response.text)
+        if ret_i:
+            ret.extend(ret_i)
+        else:
+            break
+    if is_debug():
+        print(f"DEBUG: Fetched {len(ret)} items from Asobistore")
+    return ret
 
 def get_ticket_events() -> list[DeadlineEntry]:
     """アソビチケットのイベントを取得して解析する。
@@ -202,7 +211,7 @@ def format_message(
         section: str,
         entries: Sequence[DeadlineEntry],
         omitted_message: str = "...他にも省略されています...",
-        max_display: int = 10
+        max_display: int = 15
     ) -> str:
     """エントリのリストから Discord 用のメッセージを作成する。
 
