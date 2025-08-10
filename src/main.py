@@ -7,6 +7,7 @@
 まま TODO としてマークしている。
 """
 
+import sys
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +15,15 @@ from typing import Sequence
 
 import requests
 from dateutil import tz
+
+def is_debug() -> None:
+    """デバッグ環境かどうか
+    
+    Returns:
+        bool: デバッグ環境であればTrueを返す
+    """
+    return "--DEBUG" in sys.argv
+    
 
 ASOBISTORE_URL: str = (
     "https://shop.asobistore.jp/product/catalog/s/simekiri/sime/1/cf113/118/n/120#a1"
@@ -59,6 +69,9 @@ def send_discord(webhook_url: str, content: str) -> None:
         None: 返り値はない。
     """
 
+    if is_debug():
+        print(f"DEBUG: Sending to {webhook_url} with content:\n{content}")
+        return
     requests.post(webhook_url, json={"content": content}, timeout=10)
 
 
