@@ -13,44 +13,80 @@ from selenium.webdriver.support import expected_conditions as EC
 BASE = "https://asobiticket2.asobistore.jp"
 LIST_URL = f"{BASE}/booths"
 
+
 def make_driver():
+    """Selenium 用の Chrome WebDriver を生成する。
+
+    Returns:
+        webdriver.Chrome: 構成済みの WebDriver インスタンス。
+    """
+
     tmp = tempfile.mkdtemp(prefix="selenium-prof-")
     o = Options()
-    o.add_argument("--headless=new")              # ダメなら "--headless" に
+    o.add_argument("--headless=new")  # ダメなら "--headless" に
     o.add_argument("--no-sandbox")
     o.add_argument("--disable-dev-shm-usage")
     o.add_argument("--window-size=1366,2400")
     o.add_argument(f"--user-data-dir={tmp}")
     o.add_argument("--remote-debugging-port=0")
     o.add_argument("--lang=ja-JP")
-    o.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    o.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    )
     return webdriver.Chrome(options=o)
 
+
 def accept_cookie(driver):
-    # Cookieバナーを閉じる（英/日 ざっくり）
+    """Cookie バナーを閉じる。
+
+    Args:
+        driver (webdriver.Chrome): 操作対象の WebDriver。
+    """
+
     for xp in [
         "//button[normalize-space()='Accept All Cookies']",
         "//button[contains(., 'Accept All Cookies')]",
         "//button[contains(., '同意') or contains(., '許可')]",
     ]:
         try:
-            btn = WebDriverWait(driver, 2).until(EC.element_to_be_clickable((By.XPATH, xp)))
-            btn.click(); time.sleep(0.4)
+            btn = WebDriverWait(driver, 2).until(
+                EC.element_to_be_clickable((By.XPATH, xp))
+            )
+            btn.click()
+            time.sleep(0.4)
             break
         except Exception:
             pass
 
+
 def wait_list_ready(driver):
+    """イベント一覧ページの読み込み完了を待機する。
+
+    Args:
+        driver (webdriver.Chrome): 操作対象の WebDriver。
+    """
+
     WebDriverWait(driver, 30).until(
         lambda d: d.execute_script("return document.readyState") == "complete"
     )
     # カード要素が並ぶまで待つ
     WebDriverWait(driver, 25).until(
-        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "div.booth-item[tpl-tappable]"))
+        EC.presence_of_all_elements_located(
+            (By.CSS_SELECTOR, "div.booth-item[tpl-tappable]")
+        )
     )
 
+
 def grow_list_by_scrolling(driver, max_scroll=6, pause=0.8):
+    """スクロールしてイベントカードを追加読み込みする。
+
+    Args:
+        driver (webdriver.Chrome): 操作対象の WebDriver。
+        max_scroll (int, optional): 最大スクロール回数。デフォルトは 6。
+        pause (float, optional): スクロール間の待機秒数。デフォルトは 0.8 秒。
+    """
+
     last = 0
     for _ in range(max_scroll):
         driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
@@ -60,11 +96,17 @@ def grow_list_by_scrolling(driver, max_scroll=6, pause=0.8):
             break
         last = n
 
+
 def get_uketsuke_kikan_list(d):
+    """ページから受付期間を抽出する。
+
+    Args:
+        d (webdriver.Chrome): 解析対象の WebDriver。
+
+    Returns:
+        list[tuple[datetime, datetime]]: 受付開始・終了日時のタプル一覧。
     """
-    ページ全体から「YYYY年M月D日(曜) HH:MM 〜 YYYY年M月D日(曜) HH:MM」形式を抽出し、
-    [(start_datetime, end_datetime), ...] のリストで返す
-    """
+
     # ページ全体のテキスト
     text = d.find_element(By.TAG_NAME, "body").text
 
@@ -90,13 +132,28 @@ def get_uketsuke_kikan_list(d):
 
 @dataclass
 class AsobiticketData:
+    """アソビチケットのイベント情報。
+
+    Attributes:
+        title (str | None): イベントタイトル。
+        url (str): 詳細ページの URL。
+        uketsuke_kikan_list (list[tuple[datetime, datetime]]): 受付期間のリスト。
+    """
+
     title: str | None
     url: str
     uketsuke_kikan_list: list[tuple[datetime, datetime]]
 
+
 def fetch_asobiticket() -> list[AsobiticketData]:
+    """アソビチケットのイベント一覧をスクレイピングする。
+
+    Returns:
+        list[AsobiticketData]: 取得したイベントデータのリスト。
+    """
+
     d = make_driver()
-    results:list[AsobiticketData] = []
+    results: list[AsobiticketData] = []
     try:
         d.get(LIST_URL)
         accept_cookie(d)
@@ -117,7 +174,10 @@ def fetch_asobiticket() -> list[AsobiticketData]:
             except Exception:
                 title = ""
             try:
-                thumb = card.find_element(By.CSS_SELECTOR, "img").get_attribute("src") or ""
+                thumb = (
+                    card.find_element(By.CSS_SELECTOR, "img").get_attribute("src")
+                    or ""
+                )
             except Exception:
                 thumb = ""
 
@@ -133,11 +193,13 @@ def fetch_asobiticket() -> list[AsobiticketData]:
             url = d.current_url
             # /booths/ を含む詳細遷移のみ採用
             if "/booths/" in urlparse(url).path:
-                results.append(AsobiticketData(
-                    title=title,
-                    url=url,
-                    uketsuke_kikan_list=get_uketsuke_kikan_list(d)
-                ))
+                results.append(
+                    AsobiticketData(
+                        title=title,
+                        url=url,
+                        uketsuke_kikan_list=get_uketsuke_kikan_list(d),
+                    )
+                )
 
             # 戻って次へ
             d.back()
